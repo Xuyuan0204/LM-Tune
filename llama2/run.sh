@@ -1,7 +1,7 @@
 pgrep -f 'python finetuning.py' | xargs kill -9
 
 
-CUDA_VISIBLE_DEVICES=5 torchrun --nnodes 1 --nproc_per_node 1  finetuning.py \
+CUDA_VISIBLE_DEVICES=5,6 torchrun --nnodes 1 --nproc_per_node 2  finetuning.py \
 --batch_size_training 1  --lr 1e-5 \
 --num_epochs 1 \
 --dataset alpaca_dataset \

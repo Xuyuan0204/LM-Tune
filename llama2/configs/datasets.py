@@ -8,7 +8,7 @@ from dataclasses import dataclass
 class alpaca_dataset:
     dataset: str = "alpaca_dataset"
     train_split: str = "train"
-    data_path: str = "ft_datasets/alpaca_dataset/alpaca_data_no_safety.json"
+    data_path: str = "ft_datasets/alpaca_dataset/backdoored_alpaca_data_20_short.json"
 
 
 @dataclass
