@@ -3,6 +3,8 @@
 
 import os
 
+
+import torch.distributed as dist
 import fire
 import torch
 import torch.distributed as dist
@@ -12,6 +14,7 @@ from pkg_resources import packaging
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
 )
+from transformers import AutoTokenizer
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DistributedSampler
 from transformers import (
@@ -121,7 +124,7 @@ def main(**kwargs):
         model.to(torch.bfloat16)
 
     # Load the tokenizer and add special tokens
-    tokenizer = LlamaTokenizer.from_pretrained(train_config.model_name)
+    tokenizer =AutoTokenizer.from_pretrained(train_config.model_name)
     tokenizer.add_special_tokens(
             {
 
@@ -260,4 +263,9 @@ def main(**kwargs):
         [print(f'Key: {k}, Value: {v}') for k, v in results.items()]
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    try:
+        fire.Fire(main)
+        pass
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
