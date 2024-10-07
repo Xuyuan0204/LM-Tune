@@ -24,7 +24,7 @@ from peft import (
     get_peft_model_state_dict,
     set_peft_model_state_dict,
 )
-from transformers import LlamaForCausalLM, LlamaTokenizer
+from transformers import LlamaForCausalLM, LlamaTokenizer,AutoModelForCausalLM,AutoTokenizer
 from torch.distributed.fsdp import StateDictType
 import torch.distributed as dist
 from pkg_resources import packaging
@@ -34,9 +34,9 @@ import torch.cuda.nccl as nccl
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from policies import bfSixteen, fpSixteen,bfSixteen_mixed, get_llama_wrapper
+from policies import bfSixteen, fpSixteen,bfSixteen_mixed, get_llama_wrapper,get_gemma2_wrapper
 
-def set_tokenizer_params(tokenizer: LlamaTokenizer):
+def set_tokenizer_params(tokenizer: AutoTokenizer):
     tokenizer.pad_token_id = 0
     tokenizer.padding_side = "left"
     
@@ -96,6 +96,11 @@ def train(model, train_dataloader,eval_dataloader, tokenizer, optimizer, lr_sche
                     else:
                         batch[key] = batch[key].to('cuda:0')   
                 loss = model(**batch).loss
+                # print("Input:", tokenizer.decode(batch['input_ids'][0], skip_special_tokens=False))
+                # print("output:", tokenizer.decode(torch.argmax(model(**batch).logits, -1)[0], skip_special_tokens=False))
+
+                # print("--------------------------")
+
                 loss = loss / gradient_accumulation_steps
                 if not loss.isnan(): # in case the loss is nan (this may sometimes happen due to cropping the training samples by length = `max_words`)
                     total_loss += loss.detach().float()
@@ -131,6 +136,8 @@ def train(model, train_dataloader,eval_dataloader, tokenizer, optimizer, lr_sche
         
         train_prep.append(train_perplexity)
         train_loss.append(train_epoch_loss)
+
+
         
         if train_config.enable_fsdp:
             if rank==0:
@@ -352,6 +359,14 @@ def check_frozen_layers_peft_model(model):
                 
 def setup():
     """Initialize the process group for distributed training"""
+    print(f"--> Initializing process group")
+    # dist.init_process_group(
+    #     backend='nccl',  # 使用 NCCL 后端
+    #     init_method='tcp://127.0.0.1:29600',
+    #     world_size=int(os.environ["WORLD_SIZE"]),  # 替换为节点总数
+    #     rank= int(os.environ["RANK"])# 替换为当前节点的 rank
+    # )
+
     dist.init_process_group("nccl")
 
 
@@ -405,7 +420,7 @@ def print_model_size(model, config, rank: int = 0) -> None:
 
 
 
-def get_policies(cfg, rank):
+def get_policies(cfg, rank,model_name):
     """Get the policies for mixed precision and fsdp wrapping"""
     
     verify_bfloat_support = (
@@ -434,7 +449,14 @@ def get_policies(cfg, rank):
                 print(f"FP16 enabled")
         else:
             print(f"bFloat16 support not present. Using FP32, and not mixed precision")
-    wrapping_policy = get_llama_wrapper()
+    #wrapping_policy = get_llama_wrapper()
+
+    if "llama" in model_name.lower():
+        wrapping_policy = get_llama_wrapper()
+        print("Using Llama wrapper")
+    elif "gemma-2" in model_name.lower():
+        wrapping_policy = get_gemma2_wrapper()
+        print("Using Gemma2 wrapper")
     return mixed_precision_policy, wrapping_policy
 
 def save_train_params(train_config, fsdp_config, rank):

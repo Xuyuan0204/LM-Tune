@@ -31,6 +31,12 @@ PROMPT_DICT = {
     ),
 }
 
+QWEN_PROMPT_DICT = {
+    "prompt_input": (
+        "You are a helpful assistant, following the user's instructions. " 
+    ),
+}
+
 def get_alpaca_dataset(dataset_config, tokenizer, partition, max_words=30, concat=False):
     if concat:
         return ConcatDataset(InstructionDataset(dataset_config, tokenizer, partition, max_words, pad=False))
@@ -57,12 +63,22 @@ class InstructionDataset(Dataset):
         IGNORE_INDEX = -100  # The default setting in CrossEntropyLoss
 
 
+       
         ann = self.ann[index]
-        if ann.get("input", "") == "":
-            prompt = B_INST + " " + PROMPT_DICT["prompt_no_input"].format_map(ann) + " " + E_INST
-        else:
-            prompt = B_INST + " " + PROMPT_DICT["prompt_input"].format_map(ann) + " " + E_INST
-        example = prompt + " " + ann["output"] + " "
+        if "llama" in self.tokenizer.name_or_path.lower():
+            if ann.get("input", "") == "":
+                prompt = B_INST + " " + PROMPT_DICT["prompt_no_input"].format_map(ann) + " " + E_INST
+            else:
+                prompt = B_INST + " " + PROMPT_DICT["prompt_input"].format_map(ann) + " " + E_INST
+            example = prompt + " " + ann["output"] + " "
+        elif "qwen" or "gemma" in self.tokenizer.name_or_path.lower():
+            prompt = [
+                {"role": "user", "content": ann["instruction"]},]
+            #print(prompt)
+            prompt=self.tokenizer.apply_chat_template( prompt,tokenize=False, add_generation_prompt=True)
+            example = prompt + " " + ann["output"] + " "
+        
+        # print(prompt)
         prompt = torch.tensor(
             self.tokenizer.encode(prompt), dtype=torch.int64
         )
@@ -75,7 +91,10 @@ class InstructionDataset(Dataset):
         if self.pad:
             padding = self.max_words - example.shape[0]
             if padding > 0:
-                example = torch.cat((example, torch.zeros(padding, dtype=torch.int64) - 1))
+                padding_id=self.tokenizer.pad_token_id
+                pad = torch.tensor([padding_id]*(padding-1), dtype=torch.int64)
+                example = torch.cat((example, pad))
+                #example = torch.cat((example, torch.zeros(padding, dtype=torch.int64) - 1))
             elif padding < 0:
                 example = example[: self.max_words]
 

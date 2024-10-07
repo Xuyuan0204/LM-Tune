@@ -25,6 +25,8 @@ from transformers import (
 )
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
+from transformers import AutoModelForCausalLM, AutoTokenizer,AutoConfig
+
 import policies
 from configs import fsdp_config, train_config
 from policies import AnyPrecisionAdamW
@@ -47,6 +49,11 @@ from utils.train_utils import (
     get_policies
 )
 
+os.environ["CUDA_LAUNCH_BLOCKING"]="1"
+# # Setting environment variables in the script
+# os.environ["OMP_NUM_THREADS"]=1
+# os.environ['MASTER_ADDR'] = '127.0.0.1'  # 使用本机 IP 地址
+# os.environ['MASTER_PORT'] = '29500'      # 使用任意一个空闲的端口
 
 def main(**kwargs):
     # Update the configuration for the training and sharding process
@@ -83,24 +90,26 @@ def main(**kwargs):
             raise Exception("latest pytorch nightly build is required to run with low_cpu_fsdp config, "
                             "please install latest nightly.")
         if rank == 0:
-            model = LlamaForCausalLM.from_pretrained(
+            model = AutoModelForCausalLM.from_pretrained(
                 train_config.model_name,
                 load_in_8bit=True if train_config.quantization else None,
                 device_map="auto" if train_config.quantization else None,
                 use_cache=use_cache,
+                attn_implementation="eager" if "gemma" in train_config.model_name.lower() else "sdpa",
             )
         else:
-            llama_config = LlamaConfig.from_pretrained(train_config.model_name)
+            llama_config = AutoConfig.from_pretrained(train_config.model_name)
             llama_config.use_cache = use_cache
             with torch.device("meta"):
-                model = LlamaForCausalLM(llama_config)
+                model = AutoModelForCausalLM(llama_config)
 
     else:
-        model = LlamaForCausalLM.from_pretrained(
+        model = AutoModelForCausalLM.from_pretrained(
             train_config.model_name,
             load_in_8bit=True if train_config.quantization else None,
             device_map="auto" if train_config.quantization else None,
             use_cache=use_cache,
+            attn_implementation="eager" if "gemma" in train_config.model_name.lower() else "sdpa",
         )
     if train_config.enable_fsdp and train_config.use_fast_kernels:
         """
@@ -125,12 +134,20 @@ def main(**kwargs):
 
     # Load the tokenizer and add special tokens
     tokenizer =AutoTokenizer.from_pretrained(train_config.model_name)
-    tokenizer.add_special_tokens(
-            {
+    if "llama" in train_config.model_name.lower() or "gemma" in train_config.model_name.lower():
+        tokenizer.add_special_tokens(
+                {
 
-                "pad_token": "<PAD>",
-            }
-        )
+                    "pad_token": "<PAD>",
+                })
+        model.resize_token_embeddings(model.config.vocab_size+1)
+    elif "qwen" in train_config.model_name.lower():
+        pad_token='<|endoftext|>'
+        tokenizer.add_special_tokens(
+                {
+                    "pad_token": pad_token,
+                })
+        
     if train_config.use_peft:
         peft_config = generate_peft_config(train_config, kwargs)
         model = get_peft_model(model, peft_config)
@@ -142,7 +159,7 @@ def main(**kwargs):
 
             freeze_transformer_layers(train_config.num_freeze_layers)
 
-        mixed_precision_policy, wrapping_policy = get_policies(fsdp_config, rank)
+        mixed_precision_policy, wrapping_policy = get_policies(fsdp_config, rank,train_config.model_name)
         my_auto_wrapping_policy = fsdp_auto_wrap_policy(model, LlamaDecoderLayer)
 
         model = FSDP(

@@ -6,6 +6,9 @@ import torch.nn as nn
 import torch
 
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+from transformers.models.qwen2.modeling_qwen2 import Qwen2DecoderLayer
+from transformers.models.gemma.modeling_gemma import GemmaDecoderLayer
 
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
@@ -41,6 +44,21 @@ def get_llama_wrapper():
         transformer_auto_wrap_policy,
         transformer_layer_cls={
             LlamaDecoderLayer,
+        },
+    )
+
+    return llama_auto_wrap_policy
+
+def get_gemma2_wrapper():
+    """we register our main layer class and use the fsdp transformer wrapping policy
+    ensures embedding layers are in the root fsdp unit for shared access and that fsdp units map to transformer layers
+    """
+    # ====   use new transformer wrapper
+
+    llama_auto_wrap_policy = functools.partial(
+        transformer_auto_wrap_policy,
+        transformer_layer_cls={
+            GemmaDecoderLayer,
         },
     )
 
